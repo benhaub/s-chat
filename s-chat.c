@@ -11,8 +11,13 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <assert.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <sys/select.h> /* For select() */
 /* Local Headers */
 #include <s-chat.h>
+#include <s-chat_err.h>
 
 void delay() {
 	int i;
@@ -23,9 +28,44 @@ void delay() {
  * Waits for input from the keyboard
  */
 void *keyin(void *args) {
+	/* copy of stdin for keyboard (keybin) */
+	int keybin = dup(STDIN_FILENO);
+	if(-1 == keybin) {
+		fprintf(stderr, "dup() encountered an error\n");
+		errno_check();
+	}
+	uint8_t buf[256];
+	int numbytes;
+	fd_set readfds;
+	/* Select return */
+	int selret;
+	struct timeval timeout;
+	/* Initialize the readfds bit array. */
+	FD_ZERO(&readfds);
+	/* Put keybin into the set of readfds. */
+	FD_SET(keybin, &readfds);
+	/* Timeout of 3ms before select no longer blocks. */
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 3000;
 	while(1) {
-		printf("keyin is running\n");
-		delay();
+		selret = select(FD_SETSIZE, &readfds, NULL, NULL, &timeout);
+		if(-1 == selret) {
+			fprintf(stderr, "select() encountered an error\n");
+			errno_check();
+		}
+		/* Select did not time out, there is input available in the readfds. */
+		else if(selret > 0) {
+			/*
+			 * TODO: Check and see if this is getting here. I don't get any printf's
+			 * when I run the program.
+			 */
+			numbytes = read(keybin, buf, sizeof(buf));
+			printf("%s", buf);
+			if(-1 == numbytes) {
+				fprintf(stderr, "read() encountered an error\n");
+				errno_check();
+			}
+		}
 	}
 }
 
@@ -34,8 +74,6 @@ void *keyin(void *args) {
  */
 void *receive_udp(void *args) {
 	while(1) {
-		printf("receive_udp is running\n");
-		delay();
 	}
 }
 
@@ -44,8 +82,6 @@ void *receive_udp(void *args) {
  */
 void *send_udp(void *args) {
 	while(1) {
-		printf("send_udp is running\n");
-		delay();
 	}
 }
 
@@ -54,8 +90,6 @@ void *send_udp(void *args) {
  */
 void *put_c(void *args) {
 	while(1) {
-		printf("put_local_c is running\n");
-		delay();
 	}
 }
 
@@ -75,7 +109,7 @@ int main(int argc, char *argv[]) {
 	char *remoteName;
 	unsigned int remotePort;
 	pthread_t threads[NUM_CHAT_TASKS];
-	void *tasks[4] = {keyin, receive_udp, send_udp, put_c};
+	void *tasks[NUM_CHAT_TASKS] = {keyin, receive_udp, send_udp, put_c};
 
 	localPort = atoi(argv[0]);
 	remoteName = argv[1];
@@ -93,8 +127,8 @@ int main(int argc, char *argv[]) {
 												"thread\n"); break;
 			case EINVAL:	fprintf(stderr, "invalid settings in attr\n");	break;
 
-			case EPERM:		fprintf(stderr, "No permission to set the scheduling policy "
-												"and parameters specified in attr\n"); break;
+			case EPERM:		fprintf(stderr, "No permission to set the scheduling "
+												"policy and parameters specified in attr\n"); break;
 			case 0:				break; /* No errors */
 			default:			fprintf(stderr, "Unepected error\n");	break;
 		}
@@ -110,6 +144,8 @@ int main(int argc, char *argv[]) {
 										break;
 			case ESRCH:		fprintf(stderr, "No thread with this threads ID could be "
 																		" found\n"); break;
+			case 0:				break; /* No errors */
+			default:			fprintf(stderr, "Unexpected error\n");
 		}
 		assert(retval == 0);
 	}
