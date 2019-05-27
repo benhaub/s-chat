@@ -9,12 +9,13 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <assert.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <sys/select.h> /* For select() */
+#include <fcntl.h> /* For open() */
 /* Local Headers */
 #include <s-chat.h>
 #include <s-chat_err.h>
@@ -28,43 +29,29 @@ void delay() {
  * Waits for input from the keyboard
  */
 void *keyin(void *args) {
-	/* copy of stdin for keyboard (keybin) */
-	int keybin = dup(STDIN_FILENO);
-	if(-1 == keybin) {
-		fprintf(stderr, "dup() encountered an error\n");
-		errno_check();
-	}
+	fcntl(STDIN_FILENO, F_SETFL, (O_RDONLY | O_NONBLOCK));
 	uint8_t buf[256];
 	int numbytes;
-	fd_set readfds;
-	/* Select return */
-	int selret;
-	struct timeval timeout;
-	/* Initialize the readfds bit array. */
-	FD_ZERO(&readfds);
-	/* Put keybin into the set of readfds. */
-	FD_SET(keybin, &readfds);
-	/* Timeout of 3ms before select no longer blocks. */
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 3000;
 	while(1) {
-		selret = select(FD_SETSIZE, &readfds, NULL, NULL, &timeout);
-		if(-1 == selret) {
-			fprintf(stderr, "select() encountered an error\n");
-			errno_check();
-		}
-		/* Select did not time out, there is input available in the readfds. */
-		else if(selret > 0) {
-			/*
-			 * TODO: Check and see if this is getting here. I don't get any printf's
-			 * when I run the program.
-			 */
-			numbytes = read(keybin, buf, sizeof(buf));
-			printf("%s", buf);
-			if(-1 == numbytes) {
+		numbytes = read(STDIN_FILENO, buf, sizeof(buf));
+		if(-1 == numbytes) {
+			/* read is going to error a lot, and mostly it will be EAGAIN. */
+			/* That just means that read could not perform a read without */
+			/* blocking. We're not really interested in this error as it is */
+			/* expected. */
+			if(EAGAIN == errno) {
+				/* Clear the buffer of data so it doesn't read() twice. */
+				memset(buf, 0, 256);
+				continue;
+			}
+			else {
 				fprintf(stderr, "read() encountered an error\n");
 				errno_check();
+				memset(buf, 0, 256);
 			}
+		}
+		else {
+			printf("%s", buf);
 		}
 	}
 }
